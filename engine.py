@@ -115,6 +115,15 @@ class DuetEngine:
         self._learn_enabled = False
         self.on_learn: Optional[Callable[[int, int, int], None]] = None  # (ch1..16, note, vel)
 
+        # --- Bar (measure) counter ---
+        self.ppqn = 24            # MIDI Clock: 24 per quarter note
+        self.beats_per_bar = 4    # ひとまず4/4固定
+        self.clock_count = 0
+        self.current_bar = 1
+
+        # UIへ通知（barが進んだら呼ぶ）
+        self.on_bar: Optional[Callable[[int], None]] = None
+
     # ---------- Logging ----------
     def log(self, s: str):
         if self.on_log:
@@ -287,8 +296,16 @@ class DuetEngine:
                 if msg.type == "active_sensing":
                     continue
 
-                # ignore clock in MVP (later we can use it)
+                # --- Clock -> Bar counter ---
                 if msg.type == "clock":
+                    self.clock_count += 1
+                    clocks_per_bar = self.ppqn * self.beats_per_bar  # 24 * 4 = 96
+                    if self.clock_count >= clocks_per_bar:
+                        self.clock_count = 0
+                        self.current_bar += 1
+                        if self.on_bar:
+                            self.on_bar(self.current_bar)
+                        self.log(f"[BAR] {self.current_bar}")
                     continue
 
                 # Learn trigger: first note_on only

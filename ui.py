@@ -12,6 +12,7 @@ class App(tk.Tk):
 
         self.engine = DuetEngine()
         self.engine.on_log = self._log_from_engine
+        self.engine.on_bar = self._on_bar_advanced
 
         self.song_path = "song.json"
         self.song = load_song(self.song_path)
@@ -42,6 +43,10 @@ class App(tk.Tk):
 
         self.lbl_status = ttk.Label(top, text="状態: 未接続")
         self.lbl_status.grid(row=0, column=6, padx=12)
+
+        self.bar_var = tk.StringVar(value="小節: 1")
+        self.lbl_bar = ttk.Label(top, textvariable=self.bar_var)
+        self.lbl_bar.grid(row=0, column=7, padx=12)
 
         # Middle: left patch frame + right mapping frame
         mid = ttk.Frame(self, padding=8)
@@ -317,6 +322,11 @@ class App(tk.Tk):
             self._log(f"[FILE] 読み込み: {path}")
         except Exception as e:
             messagebox.showerror("読み込みエラー", str(e))
+
+    # ---------- Bar (measure) ----------
+    def _on_bar_advanced(self, bar: int):
+        # engineスレッド → UIスレッド
+        self.after(0, lambda: self.bar_var.set(f"小節: {bar}"))
 
     # ---------- Logging ----------
     def _log(self, s: str):
