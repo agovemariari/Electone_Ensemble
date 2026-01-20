@@ -4,7 +4,12 @@ import threading
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple, Any
 
-import mido
+# Try to import mido, but allow graceful fallback
+try:
+    import mido
+    HAS_MIDI = True
+except ImportError:
+    HAS_MIDI = False
 
 
 NOTE_NAME_TO_SEMI = {
@@ -63,6 +68,8 @@ def clamp(v: int, lo: int, hi: int) -> int:
 
 
 def list_midi_ports() -> Tuple[List[str], List[str]]:
+    if not HAS_MIDI:
+        return ["[Mock] Virtual Input"], ["[Mock] Virtual Output"]
     return mido.get_input_names(), mido.get_output_names()
 
 
@@ -81,6 +88,89 @@ class Action:
     notes: List[int]
     velocity: int
     name: str = ""
+    countermelody: Optional[Dict[str, Any]] = None
+
+
+class CountermelodyScheduler:
+    """
+    Manages the countermelody timing and playback.
+    Countermelody consists of notes with specific timing (in MIDI clocks).
+    """
+
+    def __init__(self, countermelody_config: Dict[str, Any], ppqn: int = 24):
+        self.config = countermelody_config
+        self.ppqn = ppqn
+        self.bar_length = countermelody_config.get("bar_length", 1)
+        self.sequence = countermelody_config.get("sequence", [])
+        
+        # Calculate total clocks in the bar (24 clocks/beat * 4 beats/bar = 96 clocks)
+        self.bar_duration_clocks = ppqn * 4 * self.bar_length
+        
+        self.start_clock: Optional[int] = None
+        self.active_notes: Dict[Tuple[int, int], int] = {}  # (note, velocity) -> end_clock
+        self.current_index = 0
+        self.is_active = False
+
+    def start(self, current_clock: int):
+        """Start the countermelody at the given clock."""
+        self.start_clock = current_clock
+        self.current_index = 0
+        self.active_notes.clear()
+        self.is_active = True
+
+    def stop(self):
+        """Stop the countermelody and clear active notes."""
+        self.active_notes.clear()
+        self.is_active = False
+
+    def get_events_at_clock(self, current_clock: int) -> Tuple[List[Tuple[int, int]], List[int]]:
+        """
+        Returns (note_ons, note_offs) at the given clock.
+        note_ons: list of (note, velocity)
+        note_offs: list of notes to turn off
+        """
+        if not self.is_active or self.start_clock is None:
+            return [], []
+
+        elapsed = current_clock - self.start_clock
+        
+        # Check if countermelody has ended
+        if elapsed >= self.bar_duration_clocks:
+            self.stop()
+            return [], []
+
+        note_ons = []
+        note_offs = []
+
+        # Check for notes that should turn off at this clock
+        for (note, vel), end_clock in list(self.active_notes.items()):
+            if current_clock >= end_clock:
+                note_offs.append(note)
+                del self.active_notes[(note, vel)]
+
+        # Check for new notes to turn on
+        while self.current_index < len(self.sequence):
+            event = self.sequence[self.current_index]
+            event_abs_clock = event.get("timing_clock", 0)
+            
+            if event_abs_clock == elapsed:
+                # This event should happen now
+                notes_list = event.get("notes", [])
+                event_vel = event.get("velocity", 70)
+                duration = event.get("duration_clock", 12)
+                end_clock = current_clock + duration
+
+                for note in notes_list:
+                    note_ons.append((note, event_vel))
+                    self.active_notes[(note, event_vel)] = end_clock
+
+                self.current_index += 1
+            elif event_abs_clock > elapsed:
+                break
+            else:
+                self.current_index += 1
+
+        return note_ons, note_offs
 
 
 class DuetEngine:
@@ -124,6 +214,10 @@ class DuetEngine:
         # UIへ通知（barが進んだら呼ぶ）
         self.on_bar: Optional[Callable[[int], None]] = None
 
+        # --- Countermelody ---
+        self.countermelody_scheduler: Optional[CountermelodyScheduler] = None
+        self.countermelody_active_notes: List[int] = []
+
     # ---------- Logging ----------
     def log(self, s: str):
         if self.on_log:
@@ -149,8 +243,14 @@ class DuetEngine:
             notes = [note_to_int(n) for n in act["notes"]]
             vel = int(act.get("velocity", 80))
             name = m.get("name", "")
+            countermelody = m.get("countermelody", None)
 
-            self.mappings[(ch0, note)] = Action(notes=notes, velocity=vel, name=name)
+            self.mappings[(ch0, note)] = Action(
+                notes=notes,
+                velocity=vel,
+                name=name,
+                countermelody=countermelody
+            )
 
         self.log(f"[MAP] エントリ数: {len(self.mappings)} / 出力CH: {self.out_channel}")
 
@@ -158,6 +258,12 @@ class DuetEngine:
     def open_ports(self, in_port: str, out_port: str):
         self.in_port_name = in_port
         self.out_port_name = out_port
+
+        if not HAS_MIDI:
+            self.log(f"[WARN] MIDIが利用不可（mido/python-rtmidiなし）。モード: {in_port} → {out_port}")
+            self.in_port = None
+            self.out_port = None
+            return
 
         if self.in_port:
             self.in_port.close()
@@ -227,10 +333,56 @@ class DuetEngine:
             self.log(f"[OFF] {len(self.active_notes)} 音を停止")
         self.active_notes.clear()
 
+    def _start_countermelody(self, countermelody_config: Dict[str, Any]):
+        """Start a new countermelody sequence."""
+        if not countermelody_config.get("enabled", False):
+            return
+        self.countermelody_scheduler = CountermelodyScheduler(countermelody_config, self.ppqn)
+        self.countermelody_scheduler.start(self.clock_count)
+        self.log(f"[CM] 対旋律開始 @ clock={self.clock_count}")
+
+    def _stop_countermelody(self):
+        """Stop the current countermelody."""
+        if self.countermelody_scheduler:
+            # Turn off active countermelody notes
+            for n in self.countermelody_active_notes:
+                if self.out_port:
+                    self.out_port.send(mido.Message("note_off", channel=self.out_channel_0, note=n, velocity=0))
+            self.countermelody_active_notes.clear()
+            self.countermelody_scheduler.stop()
+            self.countermelody_scheduler = None
+            self.log("[CM] 対旋律停止")
+
+    def _update_countermelody(self):
+        """Update countermelody at current clock. Called from main loop."""
+        if not self.countermelody_scheduler:
+            return
+        if not self.out_port:
+            return
+
+        note_ons, note_offs = self.countermelody_scheduler.get_events_at_clock(self.clock_count)
+
+        # Turn off notes
+        for note in note_offs:
+            self.out_port.send(mido.Message("note_off", channel=self.out_channel_0, note=note, velocity=0))
+            if note in self.countermelody_active_notes:
+                self.countermelody_active_notes.remove(note)
+
+        # Turn on notes
+        for note, velocity in note_ons:
+            vel = clamp(int(velocity), 1, 127)
+            self.out_port.send(mido.Message("note_on", channel=self.out_channel_0, note=note, velocity=vel))
+            self.countermelody_active_notes.append(note)
+
+        # Check if countermelody ended
+        if not self.countermelody_scheduler.is_active:
+            self._stop_countermelody()
+
     def play_action(self, action: Action):
         if not self.out_port:
             raise RuntimeError("MIDI OUTが開かれていません。")
         self.all_notes_off()
+        self._stop_countermelody()
 
         vel = clamp(int(action.velocity), 1, 127)
         for n in action.notes:
@@ -239,6 +391,10 @@ class DuetEngine:
 
         nm = f" ({action.name})" if action.name else ""
         self.log(f"[ON] CH{self.out_channel} notes={action.notes} vel={vel}{nm}")
+
+        # Start countermelody if enabled
+        if action.countermelody and action.countermelody.get("enabled", False):
+            self._start_countermelody(action.countermelody)
 
     def test_play_notes(self, notes: List[int], velocity: int = 90, duration_ms: int = 400):
         """UIの[Test]用。短く鳴らして止める。"""
@@ -283,6 +439,7 @@ class DuetEngine:
             self._thread.join(timeout=1.0)
         self._thread = None
         self.all_notes_off()
+        self._stop_countermelody()
         self.log("[RUN] 停止")
 
     def _run_loop(self):
@@ -296,9 +453,13 @@ class DuetEngine:
                 if msg.type == "active_sensing":
                     continue
 
-                # --- Clock -> Bar counter ---
+                # --- Clock -> Bar counter + Countermelody update ---
                 if msg.type == "clock":
                     self.clock_count += 1
+                    
+                    # Update countermelody timing
+                    self._update_countermelody()
+                    
                     clocks_per_bar = self.ppqn * self.beats_per_bar  # 24 * 4 = 96
                     if self.clock_count >= clocks_per_bar:
                         self.clock_count = 0
@@ -327,3 +488,4 @@ class DuetEngine:
             self.log(f"[ERR] {e}")
         finally:
             self.all_notes_off()
+            self._stop_countermelody()

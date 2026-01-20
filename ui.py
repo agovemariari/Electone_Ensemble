@@ -19,9 +19,18 @@ class App(tk.Tk):
         self.engine.set_song(self.song)
 
         self._build_ui()
-        self._refresh_ports()
-        self._load_song_to_table()
-
+        
+        # Now load table and ports after UI is built
+        try:
+            self._load_song_to_table()
+        except Exception as e:
+            self._log(f"[ERROR] テーブル読込エラー: {e}")
+        
+        try:
+            self._refresh_ports()
+        except Exception as e:
+            self._log(f"[ERROR] ポート取得エラー: {e}")
+        
         self._log("起動しました。まず「MIDI更新」→IN/OUT選択→「接続」→「GM初期化」→「開始」がおすすめです。")
 
     # ---------- UI ----------
@@ -107,6 +116,7 @@ class App(tk.Tk):
         ttk.Button(bar, text="+ 追加", command=self._add_row).pack(side="left")
         ttk.Button(bar, text="- 削除", command=self._del_row).pack(side="left", padx=6)
         ttk.Button(bar, text="選択行を編集", command=self._edit_row).pack(side="left", padx=6)
+        ttk.Button(bar, text="対旋律編集", command=self._edit_countermelody).pack(side="left", padx=6)
         ttk.Button(bar, text="Action試聴", command=self._test_action).pack(side="left", padx=6)
 
         self.btn_learn = ttk.Button(bar, text="Trigger学習: OFF", command=self._toggle_learn)
@@ -130,7 +140,12 @@ class App(tk.Tk):
 
     # ---------- Ports / Connect ----------
     def _refresh_ports(self):
-        ins, outs = list_midi_ports()
+        try:
+            ins, outs = list_midi_ports()
+        except Exception as e:
+            self._log(f"[WARN] MIDIポート取得エラー: {e}")
+            ins, outs = [], []
+        
         self.cmb_in["values"] = ins
         self.cmb_out["values"] = outs
         if ins and not self.cmb_in.get():
@@ -195,7 +210,7 @@ class App(tk.Tk):
             name = m.get("name", "")
             tc = m["trigger"]["ch"]
             tn = m["trigger"]["note"]
-            an = ",".join(m["action"]["notes"])
+            an = ",".join(str(n) for n in m["action"]["notes"])
             vel = m["action"].get("velocity", 80)
             self.tree.insert("", "end", values=(name, tc, tn, an, vel))
 
@@ -204,10 +219,19 @@ class App(tk.Tk):
         for iid in self.tree.get_children():
             name, tc, tn, an, vel = self.tree.item(iid, "values")
             notes = [x.strip() for x in str(an).split(",") if x.strip()]
+            
+            # Find existing mapping to preserve countermelody
+            countermelody = {"enabled": False, "bar_length": 1, "sequence": []}
+            for existing_m in self.song.get("mappings", []):
+                if existing_m.get("name") == name:
+                    countermelody = existing_m.get("countermelody", countermelody)
+                    break
+            
             mappings.append({
                 "name": str(name),
                 "trigger": {"ch": int(tc), "note": str(tn)},
                 "action": {"notes": notes, "velocity": int(vel)},
+                "countermelody": countermelody,
             })
         self.song["mappings"] = mappings
         self.engine.set_song(self.song)
@@ -247,6 +271,35 @@ class App(tk.Tk):
             self.engine.test_play_notes(midi_notes, velocity=int(vel), duration_ms=450)
         except Exception as e:
             messagebox.showerror("試聴エラー", str(e))
+
+    def _edit_countermelody(self):
+        """Open countermelody editor for selected row."""
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("対旋律編集", "編集する行を選択してください。")
+            return
+        iid = sel[0]
+        name, tc, tn, an, vel = self.tree.item(iid, "values")
+        
+        # Get full mapping from song
+        mapping = None
+        for m in self.song.get("mappings", []):
+            if m["name"] == name:
+                mapping = m
+                break
+        
+        if not mapping:
+            messagebox.showerror("エラー", "マッピング情報が見つかりません。")
+            return
+        
+        countermelody = mapping.get("countermelody", {"enabled": False, "bar_length": 1, "sequence": []})
+        
+        def on_ok(new_countermelody):
+            mapping["countermelody"] = new_countermelody
+            self.engine.set_song(self.song)
+            messagebox.showinfo("対旋律編集", "対旋律が更新されました。")
+        
+        CountermelodyEditorDialog(self, mapping["name"], countermelody, self.engine, on_ok=on_ok)
 
     # ---------- Learn trigger ----------
     def _toggle_learn(self):
@@ -390,6 +443,220 @@ class EditDialog(tk.Toplevel):
             messagebox.showerror("入力エラー", str(e))
 
 
-if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+class CountermelodyEditorDialog(tk.Toplevel):
+    """Piano roll style countermelody editor."""
+
+    def __init__(self, master, mapping_name, countermelody, engine, on_ok):
+        super().__init__(master)
+        self.title(f"対旋律編集: {mapping_name}")
+        self.geometry("800x600")
+        self.resizable(True, True)
+        self.on_ok = on_ok
+        self.engine = engine
+        self.countermelody = countermelody
+        self.mapping_name = mapping_name
+
+        # Parse config
+        self.enabled = tk.BooleanVar(value=countermelody.get("enabled", False))
+        self.bar_length = tk.IntVar(value=countermelody.get("bar_length", 1))
+        self.sequence = list(countermelody.get("sequence", []))
+
+        self._build_ui()
+        self.grab_set()
+        self.transient(master)
+
+    def _build_ui(self):
+        frm = ttk.Frame(self, padding=10)
+        frm.pack(fill="both", expand=True)
+
+        # Settings
+        settings = ttk.Labelframe(frm, text="設定", padding=8)
+        settings.pack(fill="x", pady=(0, 8))
+
+        ttk.Checkbutton(settings, text="対旋律を有効にする", variable=self.enabled).pack(anchor="w")
+
+        ttk.Label(settings, text="小節の長さ (1-4):").pack(anchor="w", pady=(4, 0))
+        ttk.Spinbox(settings, from_=1, to=4, textvariable=self.bar_length, width=10).pack(anchor="w")
+
+        # Sequence editor
+        editor = ttk.Labelframe(frm, text="ピアノロール（クロック単位）", padding=8)
+        editor.pack(fill="both", expand=True, pady=(0, 8))
+
+        # Treeview for sequence
+        cols = ("timing", "notes", "velocity", "duration")
+        self.tree = ttk.Treeview(editor, columns=cols, show="headings", height=12)
+        self.tree.heading("timing", text="Timing (Clock)")
+        self.tree.heading("notes", text="Notes")
+        self.tree.heading("velocity", text="Velocity")
+        self.tree.heading("duration", text="Duration (Clock)")
+        self.tree.column("timing", width=80, anchor="center")
+        self.tree.column("notes", width=200)
+        self.tree.column("velocity", width=80, anchor="center")
+        self.tree.column("duration", width=80, anchor="center")
+        self.tree.pack(fill="both", expand=True, side="left")
+
+        # Scrollbar
+        sb = ttk.Scrollbar(editor, orient="vertical", command=self.tree.yview)
+        sb.pack(side="right", fill="y")
+        self.tree.configure(yscroll=sb.set)
+
+        # Load sequence
+        self._load_sequence()
+
+        # Buttons
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x")
+
+        ttk.Button(btns, text="+ 追加", command=self._add_event).pack(side="left", padx=2)
+        ttk.Button(btns, text="- 削除", command=self._del_event).pack(side="left", padx=2)
+        ttk.Button(btns, text="編集", command=self._edit_event).pack(side="left", padx=2)
+        ttk.Button(btns, text="試聴", command=self._preview).pack(side="left", padx=2)
+        
+        ttk.Button(btns, text="OK", command=self._ok).pack(side="right", padx=2)
+        ttk.Button(btns, text="キャンセル", command=self.destroy).pack(side="right", padx=2)
+
+    def _load_sequence(self):
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        for event in self.sequence:
+            timing = event.get("timing_clock", 0)
+            notes = ",".join(str(n) for n in event.get("notes", []))
+            velocity = event.get("velocity", 70)
+            duration = event.get("duration_clock", 12)
+            self.tree.insert("", "end", values=(timing, notes, velocity, duration))
+
+    def _add_event(self):
+        timing = 0
+        notes = "C4"
+        velocity = 70
+        duration = 12
+        vals = (timing, notes, velocity, duration)
+        EventEditorDialog(self, "イベント追加", vals, on_ok=lambda v: self._insert_event(v))
+
+    def _insert_event(self, vals):
+        timing, notes, velocity, duration = vals
+        event = {
+            "timing_clock": int(timing),
+            "notes": [note_to_int(n.strip()) for n in str(notes).split(",") if n.strip()],
+            "velocity": int(velocity),
+            "duration_clock": int(duration),
+        }
+        self.sequence.append(event)
+        self.sequence.sort(key=lambda e: e["timing_clock"])
+        self._load_sequence()
+
+    def _del_event(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        idx = self.tree.index(iid)
+        if 0 <= idx < len(self.sequence):
+            del self.sequence[idx]
+        self._load_sequence()
+
+    def _edit_event(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("編集", "編集するイベントを選択してください。")
+            return
+        iid = sel[0]
+        idx = self.tree.index(iid)
+        if 0 <= idx < len(self.sequence):
+            event = self.sequence[idx]
+            timing = event.get("timing_clock", 0)
+            notes = ",".join(str(n) for n in event.get("notes", []))
+            velocity = event.get("velocity", 70)
+            duration = event.get("duration_clock", 12)
+            vals = (timing, notes, velocity, duration)
+            EventEditorDialog(self, "イベント編集", vals, on_ok=lambda v: self._update_event(idx, v))
+
+    def _update_event(self, idx, vals):
+        if 0 <= idx < len(self.sequence):
+            timing, notes, velocity, duration = vals
+            self.sequence[idx] = {
+                "timing_clock": int(timing),
+                "notes": [note_to_int(n.strip()) for n in str(notes).split(",") if n.strip()],
+                "velocity": int(velocity),
+                "duration_clock": int(duration),
+            }
+            self.sequence.sort(key=lambda e: e["timing_clock"])
+            self._load_sequence()
+
+    def _preview(self):
+        """Play the countermelody as a preview."""
+        if not self.sequence:
+            messagebox.showinfo("試聴", "シーケンスが空です。")
+            return
+        
+        # Collect all unique notes
+        all_notes = set()
+        for event in self.sequence:
+            all_notes.update(event.get("notes", []))
+        
+        if not all_notes:
+            messagebox.showinfo("試聴", "ノートがありません。")
+            return
+        
+        try:
+            # Play a simple preview
+            notes_list = sorted(list(all_notes))
+            self.engine.test_play_notes(notes_list, velocity=70, duration_ms=500)
+        except Exception as e:
+            messagebox.showerror("試聴エラー", str(e))
+
+    def _ok(self):
+        self.countermelody["enabled"] = self.enabled.get()
+        self.countermelody["bar_length"] = self.bar_length.get()
+        self.countermelody["sequence"] = self.sequence
+        self.on_ok(self.countermelody)
+        self.destroy()
+
+
+class EventEditorDialog(tk.Toplevel):
+    """Dialog to edit a single countermelody event."""
+
+    def __init__(self, master, title, values, on_ok):
+        super().__init__(master)
+        self.title(title)
+        self.resizable(False, False)
+        self.on_ok = on_ok
+
+        timing, notes, velocity, duration = values
+        self.var_timing = tk.StringVar(value=str(timing))
+        self.var_notes = tk.StringVar(value=str(notes))
+        self.var_velocity = tk.StringVar(value=str(velocity))
+        self.var_duration = tk.StringVar(value=str(duration))
+
+        frm = ttk.Frame(self, padding=10)
+        frm.pack(fill="both", expand=True)
+
+        self._row(frm, 0, "Timing (Clock)", self.var_timing)
+        self._row(frm, 1, "Notes (C4,E4,...)", self.var_notes)
+        self._row(frm, 2, "Velocity (1-127)", self.var_velocity)
+        self._row(frm, 3, "Duration (Clock)", self.var_duration)
+
+        btns = ttk.Frame(frm)
+        btns.grid(row=4, column=0, columnspan=2, pady=(10, 0), sticky="e")
+        ttk.Button(btns, text="OK", command=self._ok).pack(side="left", padx=6)
+        ttk.Button(btns, text="キャンセル", command=self.destroy).pack(side="left")
+
+        self.grab_set()
+        self.transient(master)
+
+    def _row(self, parent, r, label, var):
+        ttk.Label(parent, text=label).grid(row=r, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(parent, textvariable=var, width=40).grid(row=r, column=1, sticky="w", pady=4)
+
+    def _ok(self):
+        try:
+            newvals = (
+                int(self.var_timing.get()),
+                self.var_notes.get().strip(),
+                int(self.var_velocity.get()),
+                int(self.var_duration.get()),
+            )
+            self.on_ok(newvals)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("入力エラー", str(e))

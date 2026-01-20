@@ -10,27 +10,91 @@
     "reverb": 40,
     "chorus": 0
   },
-  "triggers": [
+  "mappings": [
     {
-      "trigger_ch": 1,
-      "trigger_note": 76,
       "name": "Cue_A_minor",
-      "notes": [57, 60, 64, 69],
-      "velocity": 75
+      "trigger": {
+        "ch": 1,
+        "note": 76
+      },
+      "action": {
+        "notes": [57, 60, 64, 69],
+        "velocity": 75
+      },
+      "countermelody": {
+        "enabled": false,
+        "bar_length": 1,
+        "sequence": []
+      }
     },
     {
-      "trigger_ch": 2,
-      "trigger_note": 55,
       "name": "Cue_C_major",
-      "notes": [60, 64, 67, 72],
-      "velocity": 80
+      "trigger": {
+        "ch": 2,
+        "note": 55
+      },
+      "action": {
+        "notes": [60, 64, 67, 72],
+        "velocity": 80
+      },
+      "countermelody": {
+        "enabled": true,
+        "bar_length": 1,
+        "sequence": [
+          {
+            "timing_clock": 0,
+            "notes": [60],
+            "velocity": 70,
+            "duration_clock": 12
+          },
+          {
+            "timing_clock": 12,
+            "notes": [64],
+            "velocity": 75,
+            "duration_clock": 12
+          },
+          {
+            "timing_clock": 24,
+            "notes": [67],
+            "velocity": 70,
+            "duration_clock": 12
+          },
+          {
+            "timing_clock": 36,
+            "notes": [72],
+            "velocity": 80,
+            "duration_clock": 12
+          },
+          {
+            "timing_clock": 48,
+            "notes": [67],
+            "velocity": 70,
+            "duration_clock": 12
+          },
+          {
+            "timing_clock": 60,
+            "notes": [64],
+            "velocity": 75,
+            "duration_clock": 12
+          }
+        ]
+      }
     },
     {
-      "trigger_ch": 3,
-      "trigger_note": 41,
       "name": "Cue_F_major",
-      "notes": [53, 57, 60, 65],
-      "velocity": 85
+      "trigger": {
+        "ch": 3,
+        "note": 41
+      },
+      "action": {
+        "notes": [53, 57, 60, 65],
+        "velocity": 85
+      },
+      "countermelody": {
+        "enabled": false,
+        "bar_length": 1,
+        "sequence": []
+      }
     }
   ]
 }

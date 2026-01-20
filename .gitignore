@@ -1,3 +1,6 @@
 /otamesi/
 /__pycache__/
 
+debug_ui.py
+test_ui.py
+
