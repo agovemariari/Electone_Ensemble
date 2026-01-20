@@ -443,6 +443,10 @@ class EditDialog(tk.Toplevel):
             messagebox.showerror("入力エラー", str(e))
 
 
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
+
 class CountermelodyEditorDialog(tk.Toplevel):
     """Piano roll style countermelody editor."""
 
