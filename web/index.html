@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Electone Ensemble UI (Web)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">EE</div>
+          <div class="brand-text">
+            <div class="title">Electone Ensemble</div>
+            <div class="subtitle">Web UI Prototype (Feature Freeze)</div>
+          </div>
+        </div>
+        <div class="transport">
+          <button class="btn ghost" id="theme-toggle" type="button">Theme: Auto</button>
+          <button class="btn ghost">MIDI更新</button>
+          <button class="btn ghost">接続</button>
+          <button class="btn">GM初期化</button>
+          <button class="btn accent">開始</button>
+          <button class="btn danger">停止</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="side">
+          <section class="card">
+            <h3>接続</h3>
+            <p class="card-note">最初にここでIN/OUTを選択します。</p>
+            <label class="field">
+              <span>MIDI IN</span>
+              <select>
+                <option>-- select --</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>MIDI OUT</span>
+              <select>
+                <option>-- select --</option>
+              </select>
+            </label>
+            <div class="status">
+              <div>状況: 未接続</div>
+              <div>小節: 1</div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h3>パッチ（デフォルト）</h3>
+            <p class="card-note">CH別で未指定の値に使われます。</p>
+            <div class="grid-2">
+              <label class="field compact">
+                <span>出力CH</span>
+                <input value="4" />
+              </label>
+              <label class="field compact">
+                <span>Program</span>
+                <input value="48" />
+              </label>
+              <label class="field compact">
+                <span>Bank MSB</span>
+                <input value="0" />
+              </label>
+              <label class="field compact">
+                <span>Bank LSB</span>
+                <input value="0" />
+              </label>
+              <label class="field compact">
+                <span>Volume</span>
+                <input value="100" />
+              </label>
+              <label class="field compact">
+                <span>Expression</span>
+                <input value="127" />
+              </label>
+              <label class="field compact">
+                <span>Pan</span>
+                <input value="64" />
+              </label>
+              <label class="field compact">
+                <span>Reverb</span>
+                <input value="40" />
+              </label>
+            </div>
+          </section>
+        </aside>
+
+        <section class="main">
+          <nav class="tabs">
+            <button class="tab active" data-tab="mapping">マッピング</button>
+            <button class="tab" data-tab="cue">Cueトラック</button>
+            <button class="tab" data-tab="score">スコア</button>
+            <button class="tab" data-tab="cc">CCトラック</button>
+            <button class="tab" data-tab="patch">CH別パッチ</button>
+          </nav>
+
+          <div class="panel active" id="tab-mapping">
+            <div class="panel-head">
+              <h2>マッピング（トリガ → 和音/フレーズ）</h2>
+              <div class="panel-actions">
+                <button class="btn ghost">+ 追加</button>
+                <button class="btn ghost">- 削除</button>
+                <button class="btn">編集</button>
+              </div>
+            </div>
+            <div class="panel-note">
+              Trigger CH/Note を入力。Cue名はスコア・CCの紐付けキーになります。
+            </div>
+            <div class="table">
+              <div class="row head">
+                <div>名前</div><div>CH</div><div>Note</div><div>Action</div><div>Vel</div><div>Phrase</div>
+              </div>
+              <div class="row">
+                <div>Cue_A_minor</div><div>1</div><div>76</div><div>57,60,64,69</div><div>75</div><div>-</div>
+              </div>
+              <div class="row">
+                <div>Cue_C_major</div><div>2</div><div>55</div><div>60,64,67,72</div><div>80</div><div>-</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="tab-cue">
+            <div class="panel-head">
+              <h2>Cueトラック（CH1-3）</h2>
+              <div class="panel-actions">
+                <button class="btn ghost">フィルタ: 未紐付け</button>
+              </div>
+            </div>
+            <div class="panel-note">
+              Cue行を選ぶと、スコア/CCの編集対象が切り替わります。
+            </div>
+            <div class="table">
+              <div class="row head">
+                <div>Cue名</div><div>CH</div><div>Note</div><div>Score</div>
+              </div>
+              <div class="row">
+                <div>Cue_A_minor</div><div>1</div><div>76</div><div>Y</div>
+              </div>
+              <div class="row">
+                <div>Cue_C_major</div><div>2</div><div>55</div><div>Y</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="tab-score">
+            <div class="panel-head">
+              <h2>譜面エディタ（可変スタッフ）</h2>
+              <div class="panel-actions">
+                <label class="field inline">
+                  <span>拍子</span>
+                  <input id="time-num" value="4" />
+                  <span>/</span>
+                  <input id="time-den" value="4" />
+                </label>
+                <label class="field inline">
+                  <span>小節数</span>
+                  <input id="bar-count" value="2" />
+                </label>
+                <label class="field inline">
+                  <span>スタッフ数</span>
+                  <input id="track-count" value="6" />
+                </label>
+                <button class="btn ghost" id="rebuild-score" type="button">再構成</button>
+              </div>
+            </div>
+            <div class="panel-note">
+              音符長ボタンで長さを選択 → クリックで配置。CH1-3の音符を長押しで紐づけ開始。
+            </div>
+            <div class="composer">
+              <div class="tool-row">
+                <div class="tool-group">
+                  <span class="tool-label">音符長</span>
+                  <button class="duration-btn active" data-duration="1/1">1/1</button>
+                  <button class="duration-btn" data-duration="1/2">1/2</button>
+                  <button class="duration-btn" data-duration="1/4">1/4</button>
+                  <button class="duration-btn" data-duration="1/8">1/8</button>
+                  <button class="duration-btn" data-duration="1/16">1/16</button>
+                </div>
+                <div class="tool-group">
+                  <span class="tool-label">ツール</span>
+                  <button class="tool-btn active" data-tool="pen">ペン</button>
+                  <button class="tool-btn" data-tool="erase">消しゴム</button>
+                  <span class="pill">Ctrl+Z: 取消</span>
+                </div>
+                <div class="tool-group">
+                  <span class="tool-label">モード</span>
+                  <span class="pill">クリック: 追加</span>
+                  <span class="pill">ドラッグ: 移動</span>
+                  <span class="pill cue">長押し: 紐づけ</span>
+                </div>
+                <div class="tool-group">
+                  <button class="btn ghost" id="export-score" type="button">保存(JSON)</button>
+                </div>
+                <div class="link-status" id="link-status">リンク待機中</div>
+              </div>
+              <div class="staff-board" id="staff-board">
+                <svg class="link-layer" id="link-layer"></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="tab-cc">
+            <div class="panel-head">
+              <h2>CCトラック（ポイント列）</h2>
+              <div class="panel-actions">
+                <div class="hint">書式: 1:40 5:60 9:80 13:100</div>
+              </div>
+            </div>
+            <div class="panel-note">
+              CC11=Expression、CC74=Brightness。任意タイミングで変化点を追加。
+            </div>
+            <div class="table">
+              <div class="row head">
+                <div>CH</div><div>CC11</div><div>CC74</div>
+              </div>
+              <div class="row">
+                <div>4</div><div>1:40 5:60 9:80</div><div>1:20 9:60</div>
+              </div>
+              <div class="row">
+                <div>5</div><div>1:30 13:90</div><div>4:40 12:70</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" id="tab-patch">
+            <div class="panel-head">
+              <h2>CH別パッチ（CH4-16）</h2>
+              <div class="panel-actions">
+                <button class="btn ghost">一括コピー</button>
+              </div>
+            </div>
+            <div class="panel-note">
+              空欄はデフォルト値を使用。CHごとに音色を分けたいときに設定。
+            </div>
+            <div class="table dense">
+              <div class="row head">
+                <div>CH</div><div>MSB</div><div>LSB</div><div>Prog</div><div>Vol</div><div>Expr</div><div>Pan</div><div>Rev</div><div>Cho</div>
+              </div>
+              <div class="row">
+                <div>4</div><div>0</div><div>0</div><div>48</div><div>100</div><div>127</div><div>64</div><div>40</div><div>0</div>
+              </div>
+              <div class="row">
+                <div>5</div><div>0</div><div>0</div><div>40</div><div>90</div><div>110</div><div>50</div><div>30</div><div>0</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
